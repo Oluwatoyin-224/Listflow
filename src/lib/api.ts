@@ -1,125 +1,80 @@
 import { supabase } from './supabase';
-import type { Task, Note, TaskInput, NoteInput, DashboardStats } from '@/types';
+import type { Product, Order, OrderItem } from '@/types';
 
-// If VITE_API_URL is set, use the REST backend; otherwise fall back to Supabase client.
-const API_URL = import.meta.env.VITE_API_URL as string | undefined;
-
-async function restFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Request failed (${res.status})`);
-  }
-  if (res.status === 204) return undefined as T;
-  return res.json();
-}
-
-// ---------- Tasks ----------
-
-export async function fetchTasks(): Promise<Task[]> {
-  if (API_URL) return restFetch<Task[]>('/api/tasks');
+export async function fetchProducts(): Promise<Product[]> {
   const { data, error } = await supabase
-    .from('tasks')
+    .from('products')
     .select('*')
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: true });
   if (error) throw error;
-  return (data ?? []) as Task[];
+  return (data ?? []) as Product[];
 }
 
-export async function createTask(input: TaskInput): Promise<Task> {
-  if (API_URL) return restFetch<Task>('/api/tasks', { method: 'POST', body: JSON.stringify(input) });
-  const { data, error } = await supabase
-    .from('tasks')
-    .insert(input)
-    .select()
-    .single();
-  if (error) throw error;
-  return data as Task;
+export interface CreateOrderInput {
+  customer_name: string;
+  email: string;
+  phone: string;
+  address: string;
+  total: number;
+  items: OrderItem[];
 }
 
-export async function updateTask(id: string, input: Partial<TaskInput>): Promise<Task> {
-  if (API_URL) return restFetch<Task>(`/api/tasks/${id}`, { method: 'PUT', body: JSON.stringify(input) });
-  const { data, error } = await supabase
-    .from('tasks')
-    .update({ ...input, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single();
-  if (error) throw error;
-  return data as Task;
-}
+export async function createOrder(input: CreateOrderInput): Promise<{ orderId: string }> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
 
-export async function deleteTask(id: string): Promise<void> {
-  if (API_URL) {
-    await restFetch<void>(`/api/tasks/${id}`, { method: 'DELETE' });
-    return;
+  const orderPayload: Record<string, unknown> = {
+    customer_name: input.customer_name,
+    email: input.email,
+    phone: input.phone,
+    address: input.address,
+    total: input.total,
+    status: 'pending',
+  };
+  if (session?.user) {
+    orderPayload.user_id = session.user.id;
   }
-  const { error } = await supabase.from('tasks').delete().eq('id', id);
-  if (error) throw error;
-}
 
-// ---------- Notes ----------
-
-export async function fetchNotes(): Promise<Note[]> {
-  if (API_URL) return restFetch<Note[]>('/api/notes');
-  const { data, error } = await supabase
-    .from('notes')
-    .select('*')
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return (data ?? []) as Note[];
-}
-
-export async function createNote(input: NoteInput): Promise<Note> {
-  if (API_URL) return restFetch<Note>('/api/notes', { method: 'POST', body: JSON.stringify(input) });
-  const { data, error } = await supabase
-    .from('notes')
-    .insert(input)
-    .select()
+  const { data: order, error: orderError } = await supabase
+    .from('orders')
+    .insert(orderPayload)
+    .select('id')
     .single();
-  if (error) throw error;
-  return data as Note;
-}
 
-export async function updateNote(id: string, input: Partial<NoteInput>): Promise<Note> {
-  if (API_URL) return restFetch<Note>(`/api/notes/${id}`, { method: 'PUT', body: JSON.stringify(input) });
-  const { data, error } = await supabase
-    .from('notes')
-    .update({ ...input, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single();
-  if (error) throw error;
-  return data as Note;
-}
+  if (orderError) throw orderError;
+  if (!order) throw new Error('Failed to create order');
 
-export async function deleteNote(id: string): Promise<void> {
-  if (API_URL) {
-    await restFetch<void>(`/api/notes/${id}`, { method: 'DELETE' });
-    return;
+  const orderItems = input.items.map((item) => ({
+    order_id: order.id,
+    product_id: item.product_id,
+    quantity: item.quantity,
+    price: item.price,
+  }));
+
+  const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
+  if (itemsError) throw itemsError;
+
+  // Trigger confirmation email via edge function
+  try {
+    const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-order-email`;
+    await fetch(functionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({
+        orderId: order.id,
+        email: input.email,
+        customerName: input.customer_name,
+        items: input.items,
+        total: input.total,
+      }),
+    });
+  } catch {
+    // Email failure should not block the order
   }
-  const { error } = await supabase.from('notes').delete().eq('id', id);
-  if (error) throw error;
-}
 
-// ---------- Dashboard stats ----------
-
-export async function fetchDashboardStats(): Promise<DashboardStats> {
-  if (API_URL) return restFetch<DashboardStats>('/api/dashboard');
-  const { data, error } = await supabase.from('tasks').select('completed, priority, due_date');
-  if (error) throw error;
-  const tasks = data ?? [];
-  const total = tasks.length;
-  const completed = tasks.filter((t) => t.completed).length;
-  const active = total - completed;
-  const highPriority = tasks.filter((t) => t.priority === 'high').length;
-  const now = new Date();
-  const overdue = tasks.filter(
-    (t) => !t.completed && t.due_date && new Date(t.due_date) < now
-  ).length;
-  const completionRate = total === 0 ? 0 : Math.round((completed / total) * 100);
-  return { total, completed, active, highPriority, overdue, completionRate };
+  return { orderId: order.id };
 }

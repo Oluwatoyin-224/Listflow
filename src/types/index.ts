@@ -1,46 +1,45 @@
-export type Priority = 'low' | 'medium' | 'high';
-
-export interface Task {
+export interface Product {
   id: string;
-  title: string;
-  description: string | null;
-  priority: Priority;
-  due_date: string | null;
-  completed: boolean;
+  name: string;
+  description: string;
+  price: number;
+  image_url: string;
   created_at: string;
-  updated_at: string;
 }
 
-export interface Note {
+export interface CartItem {
+  product: Product;
+  quantity: number;
+}
+
+export interface OrderItem {
+  product_id: string;
+  product_name: string;
+  quantity: number;
+  price: number;
+}
+
+export interface Order {
   id: string;
-  title: string;
-  content: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface TaskInput {
-  title: string;
-  description?: string | null;
-  priority: Priority;
-  due_date?: string | null;
-  completed?: boolean;
-}
-
-export interface NoteInput {
-  title: string;
-  content?: string | null;
-}
-
-export type TaskFilter = 'all' | 'active' | 'completed' | 'high';
-
-export type TaskSort = 'created_desc' | 'created_asc' | 'due_asc' | 'due_desc' | 'priority_desc' | 'priority_asc' | 'title_asc' | 'title_desc';
-
-export interface DashboardStats {
+  customer_name: string;
+  email: string;
+  phone: string;
+  address: string;
   total: number;
-  completed: number;
-  active: number;
-  highPriority: number;
-  overdue: number;
-  completionRate: number;
+  status: string;
+  created_at: string;
+}
+
+export interface CheckoutForm {
+  customer_name: string;
+  email: string;
+  phone: string;
+  address: string;
+}
+
+export interface AuthUser {
+  id: string;
+  email: string | null;
+  name: string | null;
+  avatar_url: string | null;
 }
