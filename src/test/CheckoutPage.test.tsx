@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { useEffect, useRef } from 'react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { CartProvider, useCart } from '@/context/CartContext';
 import { CheckoutPage } from '@/components/CheckoutPage';
 
@@ -22,9 +23,13 @@ const mockProduct = {
 
 function CartSetup({ children }: { children: React.ReactNode }) {
   const { addItem, items } = useCart();
-  if (items.length === 0) {
-    setTimeout(() => addItem(mockProduct), 0);
-  }
+  const addedRef = useRef(false);
+  useEffect(() => {
+    if (items.length === 0 && !addedRef.current) {
+      addedRef.current = true;
+      addItem(mockProduct);
+    }
+  }, [addItem, items.length]);
   return <>{children}</>;
 }
 
@@ -52,10 +57,10 @@ describe('CheckoutPage', () => {
     renderCheckoutWithItem();
 
     await waitFor(() => {
-      expect(screen.getByText('Place Order')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Place Order/ })).toBeEnabled();
     });
 
-    fireEvent.click(screen.getByText('Place Order'));
+    fireEvent.click(screen.getByRole('button', { name: /Place Order/ }));
 
     await waitFor(() => {
       expect(screen.getByText('Full name is required')).toBeInTheDocument();
@@ -69,13 +74,23 @@ describe('CheckoutPage', () => {
     renderCheckoutWithItem();
 
     await waitFor(() => {
-      expect(screen.getByText('Place Order')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Place Order/ })).toBeEnabled();
     });
 
-    fireEvent.change(screen.getByPlaceholderText('jane@example.com'), {
-      target: { value: 'notanemail' },
+    await act(async () => {
+      fireEvent.change(screen.getByPlaceholderText('Jane Doe'), { target: { value: 'Jane Doe' } });
+      fireEvent.change(screen.getByPlaceholderText('jane@example.com'), {
+        target: { value: 'notanemail' },
+      });
+      fireEvent.change(screen.getByPlaceholderText('+1 555 123 4567'), { target: { value: '+1 555 123 4567' } });
+      fireEvent.change(screen.getByPlaceholderText('123 Main St, Apt 4B, New York, NY 10001'), {
+        target: { value: '123 Main St' },
+      });
     });
-    fireEvent.click(screen.getByText('Place Order'));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Place Order/ }));
+    });
 
     await waitFor(() => {
       expect(screen.getByText('Enter a valid email address')).toBeInTheDocument();
@@ -89,7 +104,7 @@ describe('CheckoutPage', () => {
     renderCheckoutWithItem(onSuccess);
 
     await waitFor(() => {
-      expect(screen.getByText('Place Order')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Place Order/ })).toBeEnabled();
     });
 
     fireEvent.change(screen.getByPlaceholderText('Jane Doe'), { target: { value: 'Jane Doe' } });
@@ -99,7 +114,7 @@ describe('CheckoutPage', () => {
       target: { value: '123 Main St' },
     });
 
-    fireEvent.click(screen.getByText('Place Order'));
+    fireEvent.click(screen.getByRole('button', { name: /Place Order/ }));
 
     await waitFor(() => {
       expect(mockCreateOrder).toHaveBeenCalledWith(
